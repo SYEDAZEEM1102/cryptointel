@@ -1,0 +1,19 @@
+{
+  "aggregator": {
+    "defillama": {
+      "baseUrl": "https://api.llama.fi",
+      "topProtocolsLimit": 25,
+      "topPoolsLimit": 20
+    },
+    "coingecko": {
+      "baseUrl": "https://api.coingecko.com/api/v3",
+      "topTokensLimit": 50,
+      "currency": "usd"
+    },
+    "coinglass": {
+      "baseUrl": "https://open-api.coinglass.com/public/v2",
+      "symbols": ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX", "LINK", "ARB"]
+    },
+    "requestTimeoutMs": 15000
+  }
+}

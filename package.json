@@ -1,0 +1,35 @@
+{
+  "name": "cryptointel",
+  "version": "0.1.0",
+  "description": "Open-source crypto research automation pipeline",
+  "main": "src/cli/index.js",
+  "bin": {
+    "cryptointel": "src/cli/index.js"
+  },
+  "scripts": {
+    "start": "node src/cli/index.js --full",
+    "aggregator": "node src/cli/index.js --module aggregator",
+    "ct-scanner": "node src/cli/index.js --module ct-scanner",
+    "news": "node src/cli/index.js --module news",
+    "onchain": "node src/cli/index.js --module onchain",
+    "synthesis": "node src/cli/index.js --module synthesis",
+    "test": "node tests/run.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.5",
+    "cheerio": "^1.2.0",
+    "commander": "^12.0.0",
+    "dayjs": "^1.11.0",
+    "dotenv": "^16.4.0"
+  },
+  "keywords": [
+    "crypto",
+    "research",
+    "automation",
+    "defi",
+    "intelligence",
+    "on-chain"
+  ],
+  "author": "BomBiggy.eth",
+  "license": "MIT"
+}
