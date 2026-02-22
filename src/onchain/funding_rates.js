@@ -8,30 +8,44 @@ const TIMEOUT = config?.aggregator?.requestTimeoutMs || 15000;
 const SYMBOLS = config?.aggregator?.coinglass?.symbols || ['BTC', 'ETH', 'SOL', 'AVAX', 'ARB', 'OP', 'SUI', 'APT'];
 const EXTREME_THRESHOLD = 0.03; // 0.03%
 
-// Use CoinGlass public endpoints + fallback to alternative free sources
-const COINGLASS_BASE = config?.aggregator?.coinglass?.baseUrl || 'https://open-api.coinglass.com/public/v2';
+const PAIRS = {
+  BTC: 'BTCUSDT', ETH: 'ETHUSDT', SOL: 'SOLUSDT', AVAX: 'AVAXUSDT',
+  ARB: 'ARBUSDT', OP: 'OPUSDT', SUI: 'SUIUSDT', APT: 'APTUSDT',
+};
 
 const ax = axios.create({ timeout: TIMEOUT });
 
-async function fetchFundingFromCoinglass() {
-  // CoinGlass public funding rate endpoint
-  try {
-    const { data } = await ax.get(`${COINGLASS_BASE}/funding`, {
-      headers: { 'accept': 'application/json' },
-    });
-    if (data?.success && data?.data) return data.data;
-  } catch { /* fall through */ }
-  return null;
+async function fetchFundingFromBinance() {
+  const results = [];
+  for (const [sym, pair] of Object.entries(PAIRS)) {
+    if (!SYMBOLS.includes(sym)) continue;
+    try {
+      const { data } = await ax.get('https://fapi.binance.com/fapi/v1/fundingRate', {
+        params: { symbol: pair, limit: 1 },
+      });
+      if (data?.[0]) {
+        results.push({ symbol: sym, exchange: 'Binance', rate: parseFloat(data[0].fundingRate), pair });
+      }
+    } catch { /* skip */ }
+  }
+  return results.length ? results : null;
 }
 
-async function fetchFundingFromAlternative() {
-  // Fallback: use CoinGecko derivatives/exchanges for basic funding data
-  try {
-    const { data } = await ax.get('https://api.coingecko.com/api/v3/derivatives/exchanges', {
-      params: { per_page: 10 },
-    });
-    return data;
-  } catch { return null; }
+async function fetchFundingFromBybit() {
+  const results = [];
+  for (const [sym, pair] of Object.entries(PAIRS)) {
+    if (!SYMBOLS.includes(sym)) continue;
+    try {
+      const { data } = await ax.get('https://api.bybit.com/v5/market/tickers', {
+        params: { category: 'linear', symbol: pair },
+      });
+      const item = data?.result?.list?.[0];
+      if (item) {
+        results.push({ symbol: sym, exchange: 'Bybit', rate: parseFloat(item.fundingRate), pair });
+      }
+    } catch { /* skip */ }
+  }
+  return results.length ? results : null;
 }
 
 function analyzeFunding(rawData) {
@@ -40,38 +54,31 @@ function analyzeFunding(rawData) {
 
   if (!rawData || !Array.isArray(rawData)) return { extreme, divergences, raw: rawData };
 
+  // Group by symbol
+  const bySymbol = {};
   for (const item of rawData) {
-    const symbol = item.symbol || item.uMarginList?.[0]?.symbol || '';
-    const upperSymbol = symbol.toUpperCase();
-    if (!SYMBOLS.some(s => upperSymbol.includes(s))) continue;
+    const sym = item.symbol;
+    if (!bySymbol[sym]) bySymbol[sym] = [];
+    bySymbol[sym].push(item);
 
-    // Handle CoinGlass format
-    const marginList = item.uMarginList || item.cMarginList || [];
-    const rates = [];
-
-    for (const entry of marginList) {
-      const rate = parseFloat(entry.rate);
-      if (isNaN(rate)) continue;
-      const exchange = entry.exchangeName || 'unknown';
-      rates.push({ exchange, rate, symbol: entry.symbol });
-
-      if (Math.abs(rate) > EXTREME_THRESHOLD) {
-        extreme.push({
-          symbol: entry.symbol || symbol,
-          exchange,
-          rate: parseFloat(rate.toFixed(4)),
-          direction: rate > 0 ? 'long_heavy' : 'short_heavy',
-        });
-      }
+    if (Math.abs(item.rate) > EXTREME_THRESHOLD) {
+      extreme.push({
+        symbol: sym,
+        exchange: item.exchange,
+        rate: parseFloat(item.rate.toFixed(4)),
+        direction: item.rate > 0 ? 'long_heavy' : 'short_heavy',
+      });
     }
+  }
 
-    // Check for divergences (spread between highest and lowest funding on same asset)
+  // Check for divergences between exchanges
+  for (const [sym, rates] of Object.entries(bySymbol)) {
     if (rates.length >= 2) {
       const sorted = rates.sort((a, b) => a.rate - b.rate);
       const spread = sorted[sorted.length - 1].rate - sorted[0].rate;
       if (spread > EXTREME_THRESHOLD) {
         divergences.push({
-          symbol: symbol,
+          symbol: sym,
           highExchange: sorted[sorted.length - 1].exchange,
           highRate: sorted[sorted.length - 1].rate,
           lowExchange: sorted[0].exchange,
@@ -89,10 +96,14 @@ async function monitorFunding() {
   const results = { extreme: [], divergences: [], summary: null, errors: [] };
 
   try {
-    let raw = await fetchFundingFromCoinglass();
+    let raw = await fetchFundingFromBinance();
     if (!raw) {
-      raw = await fetchFundingFromAlternative();
-      results.summary = 'Used fallback data source (CoinGecko derivatives). Data may be limited.';
+      raw = await fetchFundingFromBybit();
+      results.summary = 'Used Bybit fallback. Binance data unavailable.';
+    } else {
+      // Also fetch Bybit to compare cross-exchange
+      const bybitData = await fetchFundingFromBybit();
+      if (bybitData) raw = raw.concat(bybitData);
     }
 
     if (raw) {
